@@ -11,6 +11,7 @@ enum GatewayStatus: Equatable {
 final class GatewayManager {
     private(set) var status: GatewayStatus = .stopped
     private var process: Process?
+    private var stderrPipe: Pipe?
     private var statusTimer: Timer?
     private var restartCount = 0
     private let maxRestartAttempts = 5
@@ -102,8 +103,13 @@ final class GatewayManager {
                 NSLog("openclaw stderr: %@", msg)
             }
         }
+        self.stderrPipe = errPipe
 
         proc.terminationHandler = { [weak self] terminatedProcess in
+            // Stop the readability handler immediately to prevent a
+            // tight spin loop on the closed pipe (100% CPU).
+            self?.stderrPipe?.fileHandleForReading.readabilityHandler = nil
+            self?.stderrPipe = nil
             DispatchQueue.main.async {
                 self?.handleTermination(exitCode: terminatedProcess.terminationStatus)
             }
@@ -140,6 +146,8 @@ final class GatewayManager {
             proc.waitUntilExit()
         }
 
+        stderrPipe?.fileHandleForReading.readabilityHandler = nil
+        stderrPipe = nil
         process = nil
     }
 
