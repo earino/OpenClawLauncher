@@ -30,6 +30,10 @@
 	<string></string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>OpenClaw Gateway needs access to your calendar so it can read and manage your events.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>OpenClaw Gateway needs access to your calendar so it can read and manage your events.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>OpenClaw Gateway needs Local Network access to discover and control devices on your network (cameras, sensors, etc.).</string>
 	<key>NSBonjourServices</key>

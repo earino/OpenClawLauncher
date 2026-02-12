@@ -1,3 +1,4 @@
+import EventKit
 import Foundation
 import Network
 
@@ -23,6 +24,7 @@ final class GatewayManager {
         // Trigger Local Network access by making a connection attempt.
         // This is the key reason this app exists — to surface the permission dialog.
         triggerLocalNetworkAccess()
+        requestCalendarAccess()
     }
 
     // MARK: - Local Network Permission Trigger
@@ -45,6 +47,29 @@ final class GatewayManager {
         // Keep browser alive briefly to ensure dialog appears, then cancel
         DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
             browser.cancel()
+        }
+    }
+
+    // MARK: - Calendar Permission Trigger
+
+    private func requestCalendarAccess() {
+        let store = EKEventStore()
+        if #available(macOS 14.0, *) {
+            store.requestFullAccessToEvents { granted, error in
+                if let error = error {
+                    NSLog("Calendar access request error: \(error)")
+                } else {
+                    NSLog("Calendar access \(granted ? "granted" : "denied")")
+                }
+            }
+        } else {
+            store.requestAccess(to: .event) { granted, error in
+                if let error = error {
+                    NSLog("Calendar access request error: \(error)")
+                } else {
+                    NSLog("Calendar access \(granted ? "granted" : "denied")")
+                }
+            }
         }
     }
 
