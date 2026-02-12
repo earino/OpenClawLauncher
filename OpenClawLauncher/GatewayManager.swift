@@ -157,6 +157,12 @@ final class GatewayManager {
             return
         }
 
+        let pid = proc.processIdentifier
+
+        // Kill the entire process tree — openclaw is a Node.js script that
+        // spawns child processes (the actual gateway server). Sending SIGTERM
+        // only to the top-level process leaves orphaned children running.
+        killDescendants(of: pid, signal: SIGTERM)
         proc.terminate()
 
         // Give it 5 seconds to exit gracefully
@@ -167,13 +173,40 @@ final class GatewayManager {
 
         // Force kill if still running
         if proc.isRunning {
-            proc.interrupt()
+            killDescendants(of: pid, signal: SIGKILL)
+            kill(pid, SIGKILL)
             proc.waitUntilExit()
         }
 
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
         stderrPipe = nil
         process = nil
+    }
+
+    /// Recursively find and signal all descendant processes.
+    private func killDescendants(of pid: pid_t, signal: Int32) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        task.arguments = ["-P", "\(pid)"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+
+        do {
+            try task.run()
+            task.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8) {
+                for line in output.split(separator: "\n") {
+                    if let childPid = pid_t(line.trimmingCharacters(in: .whitespaces)) {
+                        killDescendants(of: childPid, signal: signal)
+                        kill(childPid, signal)
+                    }
+                }
+            }
+        } catch {
+            // pgrep not found or failed — no children to kill
+        }
     }
 
     private func handleTermination(exitCode: Int32) {
