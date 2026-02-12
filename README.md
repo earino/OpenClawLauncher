@@ -36,7 +36,7 @@ Once running, you'll see a menu bar item showing the gateway status:
 
 ## Installation
 
-1. Download `OpenClaw-Launcher-v1.0.0-macos.zip` from the [latest release](https://github.com/earino/OpenClawLauncher/releases/latest)
+1. Download `OpenClaw-Launcher-v1.0.1-macos.zip` from the [latest release](https://github.com/earino/OpenClawLauncher/releases/latest)
 2. Unzip it
 3. Drag `OpenClaw Launcher.app` to `/Applications`
 4. Launch it — approve the Local Network permission dialog when prompted
