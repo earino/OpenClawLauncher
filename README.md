@@ -33,27 +33,32 @@ Once running, you'll see a menu bar item showing the gateway status:
 
 - macOS 13.0 (Ventura) or later
 - [OpenClaw CLI](https://openclaw.ai) installed at `/usr/local/bin/openclaw`
-- Xcode 14+ (to build from source)
 
-## Building
+## Installation
+
+1. Download `OpenClaw-Launcher-v1.0.0-macos.zip` from the [latest release](https://github.com/earino/OpenClawLauncher/releases/latest)
+2. Unzip it
+3. Drag `OpenClaw Launcher.app` to `/Applications`
+4. Launch it — approve the Local Network permission dialog when prompted
+5. (Optional) Add to **System Settings > General > Login Items** to start at login
+
+### Gatekeeper Warning
+
+This app is not signed with an Apple Developer ID, so macOS will block it on first launch. To open it:
+
+- **Right-click** the app > **Open**, then click **Open** in the dialog
+
+Or go to **System Settings > Privacy & Security**, scroll down, and click **Open Anyway**.
+
+## Building from Source
+
+Requires Xcode 14+.
 
 ```bash
 ./build.sh
 ```
 
 The built app will be at `build/Build/Products/Release/OpenClaw Launcher.app`.
-
-## Installation
-
-```bash
-# Copy to Applications
-cp -R "build/Build/Products/Release/OpenClaw Launcher.app" /Applications/
-
-# Launch it
-open "/Applications/OpenClaw Launcher.app"
-```
-
-To start automatically at login, add it to **System Settings > General > Login Items**.
 
 ## How It Works
 
