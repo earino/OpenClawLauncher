@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        gatewayManager.stop()
+        gatewayManager.stopSync()
     }
 
     // MARK: - Menu Bar Setup
@@ -74,8 +74,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
 
         statusItem.menu = menu
-
-        updateUI(status: gatewayManager.status)
     }
 
     // MARK: - UI Updates

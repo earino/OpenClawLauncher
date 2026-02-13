@@ -17,14 +17,69 @@ final class GatewayManager {
     private var restartCount = 0
     private let maxRestartAttempts = 5
     private let openclawPath = "/usr/local/bin/openclaw"
+    private var gatewayPort: UInt16 = 18789
+    private var isExternalGateway = false
+    private var isPolling = false
+    private let pollQueue = DispatchQueue(label: "ai.openclaw.launcher.poll", qos: .utility)
 
     var onStatusChange: ((GatewayStatus) -> Void)?
 
     init() {
-        // Trigger Local Network access by making a connection attempt.
-        // This is the key reason this app exists — to surface the permission dialog.
+        gatewayPort = readGatewayPort()
         triggerLocalNetworkAccess()
         requestCalendarAccess()
+        startStatusPolling()
+    }
+
+    // MARK: - Config Reading
+
+    private func readGatewayPort() -> UInt16 {
+        let configPath = (NSHomeDirectory() as NSString).appendingPathComponent(".openclaw/openclaw.json")
+        guard let data = FileManager.default.contents(atPath: configPath),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let gateway = json["gateway"] as? [String: Any],
+              let port = gateway["port"] as? Int,
+              port > 0, port <= Int(UInt16.max)
+        else {
+            return 18789
+        }
+        return UInt16(port)
+    }
+
+    // MARK: - TCP Port Probe
+
+    private func checkPortListening(port: UInt16, completion: @escaping (Bool) -> Void) {
+        let connection = NWConnection(
+            host: .ipv4(.loopback),
+            port: NWEndpoint.Port(rawValue: port)!,
+            using: .tcp
+        )
+        var completed = false
+        let complete: (Bool) -> Void = { result in
+            guard !completed else { return }
+            completed = true
+            connection.cancel()
+            completion(result)
+        }
+
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                complete(true)
+            case .failed, .cancelled:
+                complete(false)
+            case .waiting:
+                complete(false)
+            default:
+                break
+            }
+        }
+
+        connection.start(queue: pollQueue)
+
+        pollQueue.asyncAfter(deadline: .now() + 2) {
+            complete(false)
+        }
     }
 
     // MARK: - Local Network Permission Trigger
@@ -85,21 +140,70 @@ final class GatewayManager {
 
         setStatus(.starting)
         restartCount = 0
-        launchProcess()
+
+        // Check if gateway is already running before launching a duplicate
+        checkPortListening(port: gatewayPort) { [weak self] isListening in
+            DispatchQueue.main.async {
+                guard let self = self, self.status == .starting else { return }
+
+                if isListening {
+                    NSLog("Gateway port \(self.gatewayPort) already open — adopting existing gateway")
+                    self.isExternalGateway = true
+                    self.setStatus(.running)
+                } else {
+                    self.launchProcess()
+                }
+            }
+        }
     }
 
     func stop() {
         guard status == .running || status == .starting else { return }
         setStatus(.stopping)
-        stopStatusPolling()
-        terminateProcess()
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            if self?.isExternalGateway == true {
+                self?.killExternalGateway()
+            } else {
+                self?.terminateProcess()
+            }
+            DispatchQueue.main.async {
+                self?.isExternalGateway = false
+                self?.setStatus(.stopped)
+            }
+        }
+    }
+
+    /// Synchronous stop for use during app termination.
+    /// Only kills our own process — leaves external gateways running.
+    func stopSync() {
+        guard status == .running || status == .starting else { return }
+        setStatus(.stopping)
+        if !isExternalGateway {
+            terminateProcess()
+        }
+        isExternalGateway = false
         setStatus(.stopped)
     }
 
     func restart() {
-        stop()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.start()
+        guard status == .running || status == .starting else { return }
+        setStatus(.stopping)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            if self?.isExternalGateway == true {
+                self?.killExternalGateway()
+            } else {
+                self?.terminateProcess()
+            }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isExternalGateway = false
+                self.setStatus(.stopped)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    self?.start()
+                }
+            }
         }
     }
 
@@ -143,8 +247,8 @@ final class GatewayManager {
         do {
             try proc.run()
             self.process = proc
+            isExternalGateway = false
             setStatus(.running)
-            startStatusPolling()
         } catch {
             NSLog("Failed to launch openclaw gateway: \(error)")
             setStatus(.stopped)
@@ -183,6 +287,20 @@ final class GatewayManager {
         process = nil
     }
 
+    private func killExternalGateway() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        task.arguments = ["-f", "openclaw gateway"]
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            NSLog("Failed to kill external gateway: \(error)")
+        }
+    }
+
     /// Recursively find and signal all descendant processes.
     private func killDescendants(of pid: pid_t, signal: Int32) {
         let task = Process()
@@ -217,6 +335,25 @@ final class GatewayManager {
 
         NSLog("Gateway process exited with code \(exitCode)")
 
+        // Check if the port is still open — child process may have survived
+        checkPortListening(port: gatewayPort) { [weak self] isListening in
+            DispatchQueue.main.async {
+                guard let self = self, self.status == .running || self.status == .starting else { return }
+
+                if isListening {
+                    NSLog("Gateway port still open — child process survived, adopting as external")
+                    self.process = nil
+                    self.isExternalGateway = true
+                    self.setStatus(.running)
+                } else {
+                    self.process = nil
+                    self.attemptRestart()
+                }
+            }
+        }
+    }
+
+    private func attemptRestart() {
         if restartCount < maxRestartAttempts {
             restartCount += 1
             let delay = min(Double(restartCount) * 2.0, 10.0) // backoff: 2s, 4s, 6s, 8s, 10s
@@ -236,8 +373,8 @@ final class GatewayManager {
 
     private func startStatusPolling() {
         stopStatusPolling()
-        statusTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
-            self?.checkProcessAlive()
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            self?.pollGatewayStatus()
         }
     }
 
@@ -246,10 +383,47 @@ final class GatewayManager {
         statusTimer = nil
     }
 
-    private func checkProcessAlive() {
-        if let proc = process, !proc.isRunning {
-            // Process died without our termination handler catching it
-            handleTermination(exitCode: proc.terminationStatus)
+    private func pollGatewayStatus() {
+        guard !isPolling else { return }
+        isPolling = true
+
+        checkPortListening(port: gatewayPort) { [weak self] isListening in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.reconcileStatus(portOpen: isListening)
+                self.isPolling = false
+            }
+        }
+    }
+
+    private func reconcileStatus(portOpen: Bool) {
+        switch status {
+        case .stopping:
+            // User-initiated stop in progress, don't override
+            break
+        case .starting:
+            if portOpen {
+                // Gateway is ready (either ours finished starting, or external)
+                setStatus(.running)
+            }
+        case .stopped:
+            if portOpen {
+                // External gateway detected
+                isExternalGateway = true
+                setStatus(.running)
+            }
+        case .running:
+            if !portOpen {
+                if isExternalGateway {
+                    // External gateway died
+                    isExternalGateway = false
+                    setStatus(.stopped)
+                } else if process == nil || process?.isRunning == false {
+                    // Our process died and port is closed — truly dead
+                    // (terminationHandler should have caught this, but safety net)
+                    setStatus(.stopped)
+                }
+            }
         }
     }
 
@@ -291,7 +465,9 @@ final class GatewayManager {
 
     deinit {
         stopStatusPolling()
-        if let proc = process, proc.isRunning {
+        if !isExternalGateway, let proc = process, proc.isRunning {
+            let pid = proc.processIdentifier
+            killDescendants(of: pid, signal: SIGTERM)
             proc.terminate()
         }
     }
