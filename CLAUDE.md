@@ -35,7 +35,8 @@ main.swift                  → Creates NSApplication + AppDelegate, starts run 
        └─ GatewayManager    → Spawns/monitors /usr/local/bin/openclaw gateway run
             ├─ NWBrowser    → Triggers Local Network permission dialog via Bonjour
             ├─ Process      → Manages openclaw subprocess lifecycle
-            └─ Timer        → Polls process health every 10s
+            ├─ NWConnection → TCP port probe for status detection
+            └─ Timer        → Polls gateway port every 3s
 ```
 
 **GatewayManager** launches `openclaw gateway run` (foreground mode, not `start` which is a launchd service command). It auto-restarts on crash up to 5 times with exponential backoff (2s–10s). The process environment explicitly includes `/usr/local/bin` in PATH because GUI login items get a minimal PATH that excludes it, which would break the `#!/usr/bin/env node` shebang in the openclaw script.
@@ -49,3 +50,13 @@ main.swift                  → Creates NSApplication + AppDelegate, starts run 
 - **Scheme name has a space:** `"OpenClaw Launcher"` — must be quoted in xcodebuild commands
 - **LSUIElement:** The app hides from the Dock via `NSApp.setActivationPolicy(.accessory)`
 - **stderr capture:** Gateway stderr is piped to NSLog (visible via `log show --predicate 'processImagePath CONTAINS "OpenClaw"'`)
+
+## Release Process
+
+Run the release script — it handles build, README update, git tag, GitHub release, and install:
+
+```bash
+./release.sh <version>   # e.g. ./release.sh 1.0.5
+```
+
+Do NOT create releases manually. Always use the script to ensure the README version is updated.
