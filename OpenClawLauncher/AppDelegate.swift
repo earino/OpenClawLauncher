@@ -3,32 +3,40 @@ import Cocoa
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var gatewayManager: GatewayManager!
+    private var permissionsManager: PermissionsManager!
 
     // Menu items we need to update
     private var statusMenuItem: NSMenuItem!
     private var startMenuItem: NSMenuItem!
     private var stopMenuItem: NSMenuItem!
     private var restartMenuItem: NSMenuItem!
+    private var enforceOwnershipMenuItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // When running inside the test host, skip all UI and gateway setup
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return
+        }
+
         // Hide dock icon — menu bar only
         NSApp.setActivationPolicy(.accessory)
 
         gatewayManager = GatewayManager()
         gatewayManager.onStatusChange = { [weak self] status in
-            DispatchQueue.main.async {
-                self?.updateUI(status: status)
-            }
+            self?.updateUI(status: status)
         }
+
+        permissionsManager = PermissionsManager()
+        permissionsManager.requestAll()
 
         setupMenuBar()
 
         // Auto-start the gateway
-        gatewayManager.start()
+        gatewayManager.send(.userStart)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        gatewayManager.stopSync()
+        gatewayManager?.sendSync(.userQuit)
     }
 
     // MARK: - Menu Bar Setup
@@ -62,6 +70,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(restartMenuItem)
 
         menu.addItem(NSMenuItem.separator())
+
+        enforceOwnershipMenuItem = NSMenuItem(
+            title: "Enforce Ownership",
+            action: #selector(toggleEnforceOwnership),
+            keyEquivalent: "e"
+        )
+        enforceOwnershipMenuItem.target = self
+        enforceOwnershipMenuItem.state = gatewayManager.enforceOwnership ? .on : .off
+        menu.addItem(enforceOwnershipMenuItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let permissionsItem = NSMenuItem(title: "Permissions...", action: #selector(showPermissions), keyEquivalent: "p")
+        permissionsItem.target = self
+        menu.addItem(permissionsItem)
 
         let updateItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "u")
         updateItem.target = self
@@ -122,38 +145,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Actions
 
     @objc private func startGateway() {
-        gatewayManager.start()
+        gatewayManager.send(.userStart)
     }
 
     @objc private func stopGateway() {
-        gatewayManager.stop()
+        gatewayManager.send(.userStop)
     }
 
     @objc private func restartGateway() {
-        gatewayManager.restart()
+        gatewayManager.send(.userRestart)
+    }
+
+    @objc private func toggleEnforceOwnership() {
+        gatewayManager.enforceOwnership.toggle()
+        enforceOwnershipMenuItem.state = gatewayManager.enforceOwnership ? .on : .off
+    }
+
+    @objc private func showPermissions() {
+        permissionsManager.showPanel()
     }
 
     @objc private func checkForUpdates() {
         statusMenuItem.title = "Status: Checking for updates..."
         gatewayManager.checkForUpdates { [weak self] result in
             DispatchQueue.main.async {
-                self?.updateUI(status: self?.gatewayManager.status ?? .stopped)
-                self?.showAlert(title: "Update Status", message: result)
+                // Restore current status display — the next onStatusChange will update it,
+                // but force a refresh now since checkForUpdates overwrote the menu item.
+                self?.statusMenuItem.title = "Status: ..."
+                self?.showUpdateAlert(result: result)
             }
         }
     }
 
     @objc private func quitApp() {
-        gatewayManager.stop()
+        gatewayManager.sendSync(.userQuit)
         NSApp.terminate(nil)
     }
 
-    private func showAlert(title: String, message: String) {
+    private func showUpdateAlert(result: UpdateCheckResult) {
         let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
+
+        if result.updateAvailable {
+            alert.messageText = "Update Available"
+            if let version = result.version {
+                alert.informativeText = "OpenClaw version \(version) is available.\n\nRun this in Terminal to update:\nopenclaw update"
+            } else {
+                alert.informativeText = "A new version of OpenClaw is available.\n\nRun this in Terminal to update:\nopenclaw update"
+            }
+        } else if result.rawOutput.contains("not found") || result.rawOutput.contains("Failed to") {
+            alert.messageText = "Update Status"
+            alert.informativeText = result.rawOutput
+        } else {
+            alert.messageText = "Up to Date"
+            alert.informativeText = "OpenClaw is running the latest version."
+        }
+
         alert.runModal()
     }
 }
