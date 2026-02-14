@@ -14,6 +14,7 @@ The OpenClaw CLI (`openclaw gateway run`) is a Node.js process. Command-line too
 3. Inherits the granted network permission to the gateway subprocess
 4. Auto-restarts the gateway on crash (up to 5 times with exponential backoff)
 5. Lives in the menu bar with start/stop/restart controls
+6. One-click launch of the [Claw Dashboard](https://github.com/openclaw-ai/claw-dashboard) TUI (when installed)
 
 ## Screenshot
 
@@ -25,6 +26,7 @@ Once running, you'll see a menu bar item showing the gateway status:
 ├── Start Gateway      ⌘S
 ├── Stop Gateway       ⌘X
 ├── Restart Gateway    ⌘R
+├── Open Dashboard     ⌘D
 ├── Check for Updates… ⌘U
 └── Quit               ⌘Q
 ```
@@ -71,6 +73,12 @@ The app is intentionally minimal — three Swift files:
 On launch, the app uses `NWBrowser` to perform a Bonjour browse for `_http._tcp` services. This is what triggers macOS to show the Local Network permission dialog. Once granted, the permission applies to the app and its child processes — including the `openclaw gateway run` subprocess it manages.
 
 The app explicitly sets `/usr/local/bin` in the child process's `PATH` because macOS login items run with a minimal environment that doesn't include it, which would otherwise break the `#!/usr/bin/env node` shebang in the openclaw script.
+
+## Dashboard Integration
+
+If the [Claw Dashboard](https://github.com/openclaw-ai/claw-dashboard) is installed at `~/.openclaw/workspace/skills/claw-dashboard/`, an **Open Dashboard** menu item (⌘D) appears automatically. Clicking it opens a new terminal window (iTerm2 if available, otherwise Terminal.app) running the dashboard TUI.
+
+The menu item is hidden when the dashboard is not installed.
 
 ## Regenerating the App Icon
 

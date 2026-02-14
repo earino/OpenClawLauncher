@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var stopMenuItem: NSMenuItem!
     private var restartMenuItem: NSMenuItem!
     private var enforceOwnershipMenuItem: NSMenuItem!
+    private var dashboardMenuItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // When running inside the test host, skip all UI and gateway setup
@@ -71,6 +72,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        dashboardMenuItem = NSMenuItem(
+            title: "Open Dashboard",
+            action: #selector(openDashboard),
+            keyEquivalent: "d"
+        )
+        dashboardMenuItem.target = self
+        dashboardMenuItem.isHidden = !isDashboardInstalled()
+        menu.addItem(dashboardMenuItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         enforceOwnershipMenuItem = NSMenuItem(
             title: "Enforce Ownership",
             action: #selector(toggleEnforceOwnership),
@@ -96,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
+        menu.delegate = self
         statusItem.menu = menu
     }
 
@@ -182,6 +195,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
+    @objc private func openDashboard() {
+        let startScript = (NSHomeDirectory() as NSString)
+            .appendingPathComponent(".openclaw/workspace/skills/claw-dashboard/start.sh")
+        let bashCommand = "/bin/bash -lc 'stty rows 30 cols 138; \(startScript)'"
+
+        let script: String
+        if preferredTerminalBundleID() == "com.googlecode.iterm2" {
+            script = """
+            tell application "iTerm"
+                activate
+                create window with default profile command "\(bashCommand)"
+                tell current window
+                    tell current session
+                        set columns to 138
+                        set rows to 30
+                    end tell
+                end tell
+            end tell
+            """
+        } else {
+            script = """
+            tell application "Terminal"
+                activate
+                do script "\(bashCommand)"
+            end tell
+            """
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        let pipe = Pipe()
+        process.standardError = pipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+            if process.terminationStatus != 0 {
+                let errData = pipe.fileHandleForReading.readDataToEndOfFile()
+                let errStr = String(data: errData, encoding: .utf8) ?? "unknown"
+                NSLog("Dashboard: osascript failed (exit %d): %@", process.terminationStatus, errStr)
+            }
+        } catch {
+            NSLog("Dashboard: failed to launch osascript: %@", error.localizedDescription)
+        }
+    }
+
+    private func isDashboardInstalled() -> Bool {
+        let path = (NSHomeDirectory() as NSString)
+            .appendingPathComponent(".openclaw/workspace/skills/claw-dashboard/index.js")
+        return FileManager.default.fileExists(atPath: path)
+    }
+
+    private func preferredTerminalBundleID() -> String {
+        if NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.googlecode.iterm2") != nil {
+            return "com.googlecode.iterm2"
+        }
+        return "com.apple.Terminal"
+    }
+
     private func showUpdateAlert(result: UpdateCheckResult) {
         let alert = NSAlert()
         alert.alertStyle = .informational
@@ -203,5 +275,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         alert.runModal()
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) {
+        dashboardMenuItem.isHidden = !isDashboardInstalled()
     }
 }

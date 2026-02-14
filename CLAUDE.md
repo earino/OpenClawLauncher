@@ -31,8 +31,9 @@ There are no tests.
 
 ```
 main.swift                  → Creates NSApplication + AppDelegate, starts run loop
-  └─ AppDelegate            → Menu bar UI (NSStatusItem), gateway lifecycle hooks
-       └─ GatewayManager    → Spawns/monitors /usr/local/bin/openclaw gateway run
+  └─ AppDelegate            → Menu bar UI (NSStatusItem), gateway lifecycle hooks, dashboard launcher
+       ├─ GatewayManager    → Spawns/monitors /usr/local/bin/openclaw gateway run
+       ├─ osascript          → Opens dashboard TUI in iTerm2/Terminal via AppleScript
             ├─ NWBrowser    → Triggers Local Network permission dialog via Bonjour
             ├─ Process      → Manages openclaw subprocess lifecycle
             ├─ NWConnection → TCP port probe for status detection
@@ -50,6 +51,7 @@ main.swift                  → Creates NSApplication + AppDelegate, starts run 
 - **Scheme name has a space:** `"OpenClaw Launcher"` — must be quoted in xcodebuild commands
 - **LSUIElement:** The app hides from the Dock via `NSApp.setActivationPolicy(.accessory)`
 - **stderr capture:** Gateway stderr is piped to NSLog (visible via `log show --predicate 'processImagePath CONTAINS "OpenClaw"'`)
+- **Dashboard integration:** "Open Dashboard" menu item (⌘D) launches `~/.openclaw/workspace/skills/claw-dashboard/start.sh` in iTerm2 (preferred) or Terminal.app via `osascript`. Hidden when dashboard is not installed. Uses `NSMenuDelegate.menuWillOpen` to check on each menu open.
 
 ## Release Process
 
