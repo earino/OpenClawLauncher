@@ -12,6 +12,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var restartMenuItem: NSMenuItem!
     private var enforceOwnershipMenuItem: NSMenuItem!
     private var dashboardMenuItem: NSMenuItem!
+    private var autoCheckMenuItem: NSMenuItem!
+    private var updateAvailableMenuItem: NSMenuItem!
+
+    private var autoCheckTimer: Timer?
+    private var updateAvailable = false
+    private var currentGatewayStatus: GatewayStatus = .starting
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // When running inside the test host, skip all UI and gateway setup
@@ -34,9 +40,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Auto-start the gateway
         gatewayManager.send(.userStart)
+
+        // Start auto-check timer if enabled
+        if UserDefaults.standard.bool(forKey: "autoCheckForUpdates") {
+            startAutoCheckTimer()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        autoCheckTimer?.invalidate()
         gatewayManager?.sendSync(.userQuit)
     }
 
@@ -102,6 +114,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateItem.target = self
         menu.addItem(updateItem)
 
+        autoCheckMenuItem = NSMenuItem(title: "  Automatically Check", action: #selector(toggleAutoCheck), keyEquivalent: "")
+        autoCheckMenuItem.target = self
+        autoCheckMenuItem.state = UserDefaults.standard.bool(forKey: "autoCheckForUpdates") ? .on : .off
+        menu.addItem(autoCheckMenuItem)
+
+        updateAvailableMenuItem = NSMenuItem(title: "  Update Available!", action: #selector(checkForUpdates), keyEquivalent: "")
+        updateAvailableMenuItem.target = self
+        updateAvailableMenuItem.isHidden = true
+        menu.addItem(updateAvailableMenuItem)
+
         menu.addItem(NSMenuItem.separator())
 
         let quitItem = NSMenuItem(title: "Quit OpenClaw Launcher", action: #selector(quitApp), keyEquivalent: "q")
@@ -115,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - UI Updates
 
     private func updateUI(status: GatewayStatus) {
+        currentGatewayStatus = status
         updateButtonTitle(status: status)
 
         switch status {
@@ -143,15 +166,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateButtonTitle(status: GatewayStatus) {
         guard let button = statusItem?.button else { return }
+        let suffix = updateAvailable ? " ⬆" : ""
         switch status {
         case .running:
-            button.title = " OpenClaw: Running"
+            button.title = " OpenClaw: Running" + suffix
         case .stopped:
-            button.title = " OpenClaw: Stopped"
+            button.title = " OpenClaw: Stopped" + suffix
         case .starting:
-            button.title = " OpenClaw: Starting"
+            button.title = " OpenClaw: Starting" + suffix
         case .stopping:
-            button.title = " OpenClaw: Stopping"
+            button.title = " OpenClaw: Stopping" + suffix
         }
     }
 
@@ -182,10 +206,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusMenuItem.title = "Status: Checking for updates..."
         gatewayManager.checkForUpdates { [weak self] result in
             DispatchQueue.main.async {
+                guard let self = self else { return }
                 // Restore current status display — the next onStatusChange will update it,
                 // but force a refresh now since checkForUpdates overwrote the menu item.
-                self?.statusMenuItem.title = "Status: ..."
-                self?.showUpdateAlert(result: result)
+                self.statusMenuItem.title = "Status: ..."
+                self.showUpdateAlert(result: result)
+                // Clear the update indicator after the user acknowledges the alert
+                self.updateAvailable = false
+                self.updateAvailableMenuItem.isHidden = true
+                self.updateButtonTitle(status: self.currentGatewayStatus)
+            }
+        }
+    }
+
+    @objc private func toggleAutoCheck() {
+        let newValue = !UserDefaults.standard.bool(forKey: "autoCheckForUpdates")
+        UserDefaults.standard.set(newValue, forKey: "autoCheckForUpdates")
+        autoCheckMenuItem.state = newValue ? .on : .off
+        if newValue {
+            startAutoCheckTimer()
+        } else {
+            stopAutoCheckTimer()
+        }
+    }
+
+    private func startAutoCheckTimer() {
+        stopAutoCheckTimer()
+        autoCheckForUpdates() // fire immediately
+        autoCheckTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            self?.autoCheckForUpdates()
+        }
+    }
+
+    private func stopAutoCheckTimer() {
+        autoCheckTimer?.invalidate()
+        autoCheckTimer = nil
+    }
+
+    private func autoCheckForUpdates() {
+        gatewayManager.checkForUpdates { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if result.updateAvailable {
+                    self.updateAvailable = true
+                    self.updateAvailableMenuItem.isHidden = false
+                    self.updateButtonTitle(status: self.currentGatewayStatus)
+                }
             }
         }
     }
