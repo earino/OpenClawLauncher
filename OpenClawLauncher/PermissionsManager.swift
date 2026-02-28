@@ -1,3 +1,4 @@
+import AVFoundation
 import Cocoa
 import CoreBluetooth
 import EventKit
@@ -55,6 +56,7 @@ final class PermissionsManager {
         requestCalendarAccess()
         requestBluetoothAccess()
         requestAppManagementAccess()
+        requestMicrophoneAccess()
     }
 
     // MARK: - Permission Requests
@@ -104,6 +106,12 @@ final class PermissionsManager {
 
         DispatchQueue.global().asyncAfter(deadline: .now() + 5) { [weak self] in
             self?.bluetoothManager = nil
+        }
+    }
+
+    private func requestMicrophoneAccess() {
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            NSLog("Microphone access \(granted ? "granted" : "denied")")
         }
     }
 
@@ -191,6 +199,16 @@ final class PermissionsManager {
         localNetworkStatusLabel?.textColor = status.statusColor
     }
 
+    private func checkMicrophoneStatus() -> PermissionStatus {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:     return .granted
+        case .denied:         return .denied
+        case .notDetermined:  return .notDetermined
+        case .restricted:     return .restricted
+        @unknown default:     return .unknown("Unknown")
+        }
+    }
+
     private func checkAppManagementStatus() -> PermissionStatus {
         let bundlePath = "/Applications/OpenClaw Launcher.app"
         let fm = FileManager.default
@@ -224,6 +242,12 @@ final class PermissionsManager {
                 detail: "Discover BT devices",
                 status: checkBluetoothStatus(),
                 requestAction: { [weak self] in self?.requestBluetoothAccess() }
+            ),
+            PermissionInfo(
+                name: "Microphone",
+                detail: "Process voice input",
+                status: checkMicrophoneStatus(),
+                requestAction: { [weak self] in self?.requestMicrophoneAccess() }
             ),
             PermissionInfo(
                 name: "App Management",
