@@ -1,3 +1,4 @@
+import ApplicationServices
 import AVFoundation
 import Cocoa
 import CoreBluetooth
@@ -127,6 +128,66 @@ final class PermissionsManager {
         }
     }
 
+    private func requestAccessibilityAccess() {
+        // Prompt macOS to show the Accessibility permission dialog
+        let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary
+        AXIsProcessTrustedWithOptions(options)
+    }
+
+    // MARK: - Accessibility Check
+
+    func checkAccessibilityStatus() -> PermissionStatus {
+        return AXIsProcessTrusted() ? .granted : .denied
+    }
+
+    // MARK: - Automation Preflight
+
+    /// Tests whether the app can control the given terminal via AppleScript.
+    /// Returns nil on success, or an error message string on failure.
+    func testAutomationPermission(terminalBundleID: String) -> String? {
+        let appName = terminalBundleID == "com.googlecode.iterm2" ? "iTerm" : "Terminal"
+        let script = "tell application \"\(appName)\" to get name"
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        let errPipe = Pipe()
+        let outPipe = Pipe()
+        process.standardError = errPipe
+        process.standardOutput = outPipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return "Failed to run osascript: \(error.localizedDescription)"
+        }
+
+        if process.terminationStatus == 0 {
+            return nil // success
+        }
+
+        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+        let errStr = String(data: errData, encoding: .utf8) ?? ""
+
+        if errStr.contains("not allowed assistive access")
+            || errStr.contains("assistive access") {
+            return "Accessibility (Assistive Access) permission is required.\n\n"
+                + "Go to: System Settings > Privacy & Security > Accessibility\n"
+                + "and add \"OpenClaw Launcher\"."
+        }
+
+        if errStr.contains("Not authorized to send Apple events")
+            || errStr.contains("CommandProcess") && errStr.contains("error")
+            || errStr.contains("-1743") {
+            return "Automation permission is required to control \(appName).\n\n"
+                + "Go to: System Settings > Privacy & Security > Automation\n"
+                + "and enable \"\(appName)\" under \"OpenClaw Launcher\"."
+        }
+
+        return "osascript failed (exit \(process.terminationStatus)): \(errStr)"
+    }
+
     // MARK: - Status Checks
 
     private func checkCalendarStatus() -> PermissionStatus {
@@ -254,6 +315,12 @@ final class PermissionsManager {
                 detail: "Update app in /Applications",
                 status: checkAppManagementStatus(),
                 requestAction: { [weak self] in self?.requestAppManagementAccess() }
+            ),
+            PermissionInfo(
+                name: "Accessibility",
+                detail: "Control terminal for Dashboard",
+                status: checkAccessibilityStatus(),
+                requestAction: { [weak self] in self?.requestAccessibilityAccess() }
             ),
         ]
     }

@@ -36,6 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissionsManager = PermissionsManager()
         permissionsManager.requestAll()
 
+        // Log Accessibility status at startup for diagnostics
+        let axStatus = permissionsManager.checkAccessibilityStatus()
+        NSLog("Accessibility permission: %@", axStatus.description)
+
         setupMenuBar()
 
         // Auto-start the gateway
@@ -262,12 +266,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openDashboard() {
+        let terminalID = preferredTerminalBundleID()
+
+        // Preflight: check Automation permission before attempting the full script
+        if let errMsg = permissionsManager.testAutomationPermission(terminalBundleID: terminalID) {
+            NSLog("Dashboard: permission preflight failed: %@", errMsg)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Permission Required"
+            alert.informativeText = errMsg
+            alert.addButton(withTitle: "Open System Settings")
+            alert.addButton(withTitle: "Cancel")
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                // Open the appropriate Privacy & Security pane
+                if errMsg.contains("Accessibility") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } else {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+            return
+        }
+
         let startScript = (NSHomeDirectory() as NSString)
             .appendingPathComponent(".openclaw/workspace/skills/claw-dashboard/start.sh")
         let bashCommand = "/bin/bash -lc 'stty rows 30 cols 138; \(startScript)'"
 
         let script: String
-        if preferredTerminalBundleID() == "com.googlecode.iterm2" {
+        if terminalID == "com.googlecode.iterm2" {
             script = """
             tell application "iTerm"
                 activate
@@ -301,9 +332,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let errData = pipe.fileHandleForReading.readDataToEndOfFile()
                 let errStr = String(data: errData, encoding: .utf8) ?? "unknown"
                 NSLog("Dashboard: osascript failed (exit %d): %@", process.terminationStatus, errStr)
+                showDashboardPermissionError(errStr)
             }
         } catch {
             NSLog("Dashboard: failed to launch osascript: %@", error.localizedDescription)
+        }
+    }
+
+    private func showDashboardPermissionError(_ errStr: String) {
+        var message = "Failed to open the dashboard terminal."
+        var settingsURL: URL?
+
+        if errStr.contains("not allowed assistive access") || errStr.contains("assistive access") {
+            message = "Accessibility (Assistive Access) permission is required.\n\n"
+                + "Go to: System Settings > Privacy & Security > Accessibility\n"
+                + "and add \"OpenClaw Launcher\"."
+            settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        } else if errStr.contains("Not authorized to send Apple events") || errStr.contains("-1743") {
+            message = "Automation permission is required.\n\n"
+                + "Go to: System Settings > Privacy & Security > Automation\n"
+                + "and enable the terminal app under \"OpenClaw Launcher\"."
+            settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
+        } else {
+            message = "osascript error: \(errStr)\n\n"
+                + "If this is a permissions issue, check:\n"
+                + "System Settings > Privacy & Security > Automation"
+            settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Dashboard Launch Failed"
+        alert.informativeText = message
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "OK")
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn, let url = settingsURL {
+            NSWorkspace.shared.open(url)
         }
     }
 

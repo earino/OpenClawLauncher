@@ -74,6 +74,39 @@ On launch, the app uses `NWBrowser` to perform a Bonjour browse for `_http._tcp`
 
 The app explicitly sets `/usr/local/bin` in the child process's `PATH` because macOS login items run with a minimal environment that doesn't include it, which would otherwise break the `#!/usr/bin/env node` shebang in the openclaw script.
 
+## Permissions
+
+OpenClaw Launcher requires several macOS permissions. Most are prompted automatically on first use; the Permissions panel (⌘P) shows current status for all of them.
+
+### Required for Dashboard (Open Dashboard ⌘D)
+
+The "Open Dashboard" feature uses AppleScript to open a terminal window. This requires:
+
+1. **Automation** — allows the app to control iTerm2 or Terminal.app
+   - macOS prompts automatically the first time. If denied, re-enable at:
+   - **System Settings > Privacy & Security > Automation** → enable the terminal app under "OpenClaw Launcher"
+
+2. **Accessibility** (Assistive Access) — required by some macOS versions for UI scripting
+   - **System Settings > Privacy & Security > Accessibility** → add "OpenClaw Launcher"
+
+If a permission is missing, the app shows an alert with the exact System Settings path and an "Open System Settings" button.
+
+### Verifying Permissions
+
+Run the included verification script to check permission status from the command line:
+
+```bash
+./verify_permissions.sh
+```
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| "Open Dashboard" does nothing or shows a permission error | Grant Automation permission for Terminal/iTerm2 in System Settings > Privacy & Security > Automation |
+| Alert mentions "assistive access" | Add the app in System Settings > Privacy & Security > Accessibility |
+| Gateway can't reach LAN devices | Approve Local Network permission (re-trigger via Permissions panel > Local Network > Request) |
+
 ## Dashboard Integration
 
 If the [Claw Dashboard](https://github.com/spleck/claw-dashboard) is installed at `~/.openclaw/workspace/skills/claw-dashboard/`, an **Open Dashboard** menu item (⌘D) appears automatically. Clicking it opens a new terminal window (iTerm2 if available, otherwise Terminal.app) running the dashboard TUI.
