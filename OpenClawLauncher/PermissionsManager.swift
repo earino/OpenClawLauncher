@@ -130,7 +130,7 @@ final class PermissionsManager {
 
     private func requestAccessibilityAccess() {
         // Prompt macOS to show the Accessibility permission dialog
-        let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
     }
 
